@@ -1,17 +1,17 @@
-# 天天爱掌蛋 AI Agent
+# 天天爱掼蛋 AI Agent
 
-> 掌蛋牌类AI智能体 - 规则引擎、图像识别、AI策略
+> 掼蛋牌类AI智能体 - 规则引擎、图像识别、AI策略
 
 [![CI](https://github.com/claude58888-debug/tiantian-ai-guandan/actions/workflows/ci.yml/badge.svg)](https://github.com/claude58888-debug/tiantian-ai-guandan/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 ## 项目简介
 
-本项目是一个掌蛋牌类游戏的AI智能体，针对[天天爱掌蛋](https://www.ttigd.com/)客户端设计。包含完整的掌蛋规则引擎、多级AI策略、图像识别层和CLI交互界面。
+本项目是一个掼蛋牌类游戏的AI智能体，针对[天天爱掌蛋](https://www.ttigd.com/)客户端设计。包含完整的掼蛋规则引擎、多级AI策略、图像识别层和CLI交互界面。
 
 ## 功能特性
 
-- **完整规则引擎**: 支持掌蛋全部牌型（单牌/对子/三条/三带二/顺子/连对/钢板/炸弹/火箭）
+- **完整规则引擎**: 支持掼蛋全部牌型（单牌/对子/三条/三带二/顺子/连对/钢板/炸弹/火箭）
 - **逢人配逻辑**: 红桃级牌万能牌替代规则
 - **多级AI策略**: Random/Greedy/Smart三种策略，可调节侵略度
 - **截屏识别**: 游戏窗口截取与牌面OCR识别
