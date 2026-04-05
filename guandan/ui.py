@@ -33,6 +33,8 @@ class MainWindowViewModel:
         default_factory=lambda: ["S3", "H3", "C4", "D4", "S5", "H5", "S6", "H6"]
     )
     recognition_confidence: float = 0.92
+    auto_detect_enabled: bool = False
+    calibration_region: tuple[int, int, int, int] = (0, 0, 1024, 768)
     remaining_counts: dict[str, int] = field(
         default_factory=lambda: {"self": 8, "left": 10, "partner": 6, "right": 3}
     )
@@ -93,6 +95,19 @@ class GuandanUI(tk.Tk):
         )
         self.pause_button.grid(row=0, column=2, padx=6)
 
+        self.auto_detect_var = tk.BooleanVar(value=False)
+        self.auto_detect_button = ttk.Checkbutton(
+            self.status_bar, text="自动识别",
+            variable=self.auto_detect_var,
+            command=self.handle_auto_detect_toggle,
+        )
+        self.auto_detect_button.grid(row=0, column=3, padx=6)
+
+        self.calibrate_button = ttk.Button(
+            self.status_bar, text="校准区域", command=self.handle_calibrate
+        )
+        self.calibrate_button.grid(row=0, column=4, padx=6)
+
         body = ttk.Frame(self, padding=10)
         body.grid(row=1, column=0, sticky="nsew")
         body.columnconfigure(0, weight=3)
@@ -119,6 +134,9 @@ class GuandanUI(tk.Tk):
 
         self.hand_text = tk.Text(self.hand_frame, height=10, wrap="word")
         self.hand_text.pack(fill="both", expand=True)
+
+        self.confidence_label = ttk.Label(self.hand_frame, text="")
+        self.confidence_label.pack(anchor="w")
 
         self.suggestion_frame = ttk.LabelFrame(right, text="建议动作", padding=10)
         self.suggestion_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
@@ -173,6 +191,8 @@ class GuandanUI(tk.Tk):
             f"hand_count: {len(self.vm.hand_cards)}\n\n" + " ".join(self.vm.hand_cards),
         )
 
+        self._update_confidence_indicator()
+
         suggestion_lines = []
         for i, s in enumerate(self.vm.suggestions, start=1):
             cards = "PASS" if not s.cards else " ".join(s.cards)
@@ -217,6 +237,88 @@ class GuandanUI(tk.Tk):
             self.vm.app_status = "paused"
             self.vm.logs.append("[info] Observation paused")
         self.refresh_view()
+
+    def handle_auto_detect_toggle(self) -> None:
+        enabled = self.auto_detect_var.get()
+        self.vm.auto_detect_enabled = enabled
+        if enabled:
+            self.vm.logs.append("[info] Auto detect enabled")
+        else:
+            self.vm.logs.append("[info] Auto detect disabled")
+        self.refresh_view()
+
+    def handle_calibrate(self) -> None:
+        dialog = CalibrationDialog(self, self.vm.calibration_region)
+        self.wait_window(dialog)
+        if dialog.result is not None:
+            self.vm.calibration_region = dialog.result
+            self.vm.logs.append(
+                f"[info] Calibration updated: {dialog.result}"
+            )
+            self.refresh_view()
+
+    def _update_confidence_indicator(self) -> None:
+        conf = self.vm.recognition_confidence
+        if conf >= 0.8:
+            color = "green"
+            label = "高"
+        elif conf >= 0.5:
+            color = "#cc8800"
+            label = "中"
+        else:
+            color = "red"
+            label = "低"
+        text = f"识别置信度: {conf:.0%} ({label})"
+        self.confidence_label.config(text=text, foreground=color)
+
+
+class CalibrationDialog(tk.Toplevel):
+    """Dialog for selecting the game window capture region.
+
+    The user enters x, y, width, height values to define the area
+    of the screen that contains the game window.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Tk,
+        current: tuple[int, int, int, int],
+    ) -> None:
+        super().__init__(parent)
+        self.title("校准游戏区域")
+        self.geometry("320x200")
+        self.resizable(False, False)
+        self.result: tuple[int, int, int, int] | None = None
+
+        self._entries: dict[str, tk.Entry] = {}
+        labels = ["X", "Y", "宽度", "高度"]
+        for i, (label, val) in enumerate(zip(labels, current)):
+            ttk.Label(self, text=label).grid(row=i, column=0, padx=10, pady=4, sticky="e")
+            entry = ttk.Entry(self, width=12)
+            entry.insert(0, str(val))
+            entry.grid(row=i, column=1, padx=10, pady=4)
+            self._entries[label] = entry
+
+        btn_frame = ttk.Frame(self)
+        btn_frame.grid(row=4, column=0, columnspan=2, pady=10)
+
+        ttk.Button(btn_frame, text="确认", command=self._on_ok).pack(side="left", padx=8)
+        ttk.Button(btn_frame, text="取消", command=self.destroy).pack(side="left", padx=8)
+
+        self.transient(parent)
+        self.grab_set()
+
+    def _on_ok(self) -> None:
+        try:
+            values = tuple(
+                int(self._entries[k].get())
+                for k in ["X", "Y", "宽度", "高度"]
+            )
+            if len(values) == 4:
+                self.result = values  # type: ignore[assignment]
+        except ValueError:
+            pass
+        self.destroy()
 
 
 def main() -> None:
