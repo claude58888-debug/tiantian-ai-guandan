@@ -11,6 +11,11 @@ Rules:
 - Wild cards cannot be used in: Joker Bomb (4 jokers)
 - Wild cards CAN be played as themselves (their natural rank)
 - Two wild cards together form a pair of their natural rank
+
+V0.3 fix (C-2): When multiple wild cards are present, the substitution
+engine now searches all combinations and uses a proper priority ranking
+that considers bomb hierarchy, card count, and strategic value rather
+than a simple greedy (combo_type.value, rank_key) comparison.
 """
 from __future__ import annotations
 
@@ -56,89 +61,41 @@ def _possible_ranks() -> List[Rank]:
     return list(Rank)
 
 
-def classify_with_wilds(
-    cards: Sequence[Card], level: Rank
-) -> Optional[Combo]:
-    """Classify a combo, considering wild card substitutions.
-    
-    First tries classifying as-is (natural). If that fails and there
-    are wild cards, tries all possible substitutions to find a valid combo.
-    Returns the best (highest-ranked) valid combo found, or None.
+def _combo_priority(combo: Combo) -> Tuple[int, int, int]:
+    """Compute a priority tuple for ranking wild-card substitution results.
+
+    Priority order (higher is better):
+    1. Bomb tier: bombs always beat non-bombs; higher bomb type wins.
+    2. Card count: among non-bomb combos, using more cards in a single
+       combo is strategically preferable (clears the hand faster).
+    3. Rank key: within the same type, higher rank is better.
     """
-    # Try natural classification first
-    natural = classify_combo(cards, level)
-    if natural is not None:
-        return natural
-    
-    normal, wilds = split_wilds(cards, level)
-    if not wilds:
-        return None  # No wilds, can't form anything
-    
-    n_wilds = len(wilds)
-    n = len(cards)
-    
-    # Don't allow wild substitution for joker bomb
-    if n == 4 and all(c.is_joker for c in normal):
-        return None
-    
-    # Try substituting wilds with every possible rank/suit
-    best: Optional[Combo] = None
-    ranks = _possible_ranks()
-    suits = list(Suit)
-    
-    # Generate all possible substitutions for wild cards
-    for subs in product(product(ranks, suits), repeat=n_wilds):
-        trial_cards = list(normal)
-        for i, (r, s) in enumerate(subs):
-            trial_cards.append(_make_substitute(r, s, wilds[i].deck_id))
-        
-        combo = classify_combo(trial_cards, level)
-        if combo is not None:
-            # Prefer: higher combo type, then higher rank_key
-            if best is None:
-                best = combo
-            elif (combo.combo_type.value, combo.rank_key) > (
-                best.combo_type.value, best.rank_key
-            ):
-                best = combo
-    
-    if best is None:
-        return None
-    
-    # Return combo with original cards (including wilds), not substitutes
-    return Combo(
-        combo_type=best.combo_type,
-        cards=tuple(cards),
-        rank_key=best.rank_key,
-    )
+    bomb_tier = combo.combo_type.value if combo.is_bomb else 0
+    return (bomb_tier, combo.size, combo.rank_key)
 
 
-def find_wild_combos(
-    cards: Sequence[Card], level: Rank
+def _collect_all_substitutions(
+    normal: List[Card],
+    wilds: List[Card],
+    level: Rank,
 ) -> List[Combo]:
-    """Find all possible combos from a set of cards using wild substitution.
-    
-    This is an exhaustive search - for a hand with wilds, finds every
-    valid combo that can be formed by substituting wild cards.
-    Returns deduplicated list of combos.
+    """Try every rank/suit substitution for each wild card.
+
+    Returns a deduplicated list of all valid Combo objects found,
+    each carrying the *original* cards (including wilds).
     """
-    normal, wilds = split_wilds(cards, level)
-    if not wilds:
-        result = classify_combo(cards, level)
-        return [result] if result else []
-    
     n_wilds = len(wilds)
-    seen = set()
-    results = []
-    
+    original_cards = tuple(normal + wilds)
     ranks = _possible_ranks()
     suits = list(Suit)
-    
+    seen: set[Tuple[ComboType, int]] = set()
+    results: List[Combo] = []
+
     for subs in product(product(ranks, suits), repeat=n_wilds):
         trial_cards = list(normal)
         for i, (r, s) in enumerate(subs):
             trial_cards.append(_make_substitute(r, s, wilds[i].deck_id))
-        
+
         combo = classify_combo(trial_cards, level)
         if combo is not None:
             key = (combo.combo_type, combo.rank_key)
@@ -146,10 +103,64 @@ def find_wild_combos(
                 seen.add(key)
                 results.append(Combo(
                     combo_type=combo.combo_type,
-                    cards=tuple(cards),
+                    cards=original_cards,
                     rank_key=combo.rank_key,
                 ))
-    
+
+    return results
+
+
+def classify_with_wilds(
+    cards: Sequence[Card], level: Rank
+) -> Optional[Combo]:
+    """Classify a combo, considering wild card substitutions.
+
+    First tries classifying as-is (natural). If that fails and there
+    are wild cards, tries all possible substitutions to find the best
+    valid combo using a proper priority ranking (bombs > larger combos
+    > higher rank) rather than a simple greedy comparison.
+
+    Returns the best valid combo found, or None.
+    """
+    # Try natural classification first
+    natural = classify_combo(cards, level)
+    if natural is not None:
+        return natural
+
+    normal, wilds = split_wilds(cards, level)
+    if not wilds:
+        return None  # No wilds, can't form anything
+
+    n = len(cards)
+
+    # Don't allow wild substitution for joker bomb
+    if n == 4 and all(c.is_joker for c in normal):
+        return None
+
+    candidates = _collect_all_substitutions(normal, wilds, level)
+    if not candidates:
+        return None
+
+    # Pick the best candidate using the full priority ranking
+    return max(candidates, key=_combo_priority)
+
+
+def find_wild_combos(
+    cards: Sequence[Card], level: Rank
+) -> List[Combo]:
+    """Find all possible combos from a set of cards using wild substitution.
+
+    This is an exhaustive search - for a hand with wilds, finds every
+    valid combo that can be formed by substituting wild cards.
+    Returns deduplicated list of combos sorted by priority (best first).
+    """
+    normal, wilds = split_wilds(cards, level)
+    if not wilds:
+        result = classify_combo(cards, level)
+        return [result] if result else []
+
+    results = _collect_all_substitutions(normal, wilds, level)
+    results.sort(key=_combo_priority, reverse=True)
     return results
 
 
@@ -159,12 +170,15 @@ def can_beat_with_wilds(
     level: Rank,
 ) -> Optional[Combo]:
     """Check if cards (possibly with wilds) can beat last_play.
-    
-    Returns the best combo that beats last_play, or None.
+
+    Searches *all* valid substitution combos (not just the single
+    "best" one) so that a beating combo is found whenever one exists.
+    Returns the highest-priority combo that beats last_play, or None.
     """
     from guandan.compare import can_beat
-    
-    combo = classify_with_wilds(cards, level)
-    if combo is not None and can_beat(combo, last_play):
-        return combo
-    return None
+
+    all_combos = find_wild_combos(cards, level)
+    beaters = [c for c in all_combos if can_beat(c, last_play)]
+    if not beaters:
+        return None
+    return max(beaters, key=_combo_priority)
