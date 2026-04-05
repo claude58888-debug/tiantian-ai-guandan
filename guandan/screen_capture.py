@@ -65,6 +65,47 @@ class CaptureRegion:
             window_top + self.y + self.h,
         )
 
+    @property
+    def is_valid(self) -> bool:
+        """Check if the region has positive dimensions."""
+        return self.w > 0 and self.h > 0
+
+    def scaled(self, factor: float) -> 'CaptureRegion':
+        """Return a new region with coordinates scaled by *factor*.
+
+        Useful for adapting regions designed at 1x to HiDPI displays.
+        """
+        if factor <= 0:
+            raise ValueError(f'Scale factor must be positive, got {factor}')
+        return CaptureRegion(
+            name=self.name,
+            x=round(self.x * factor),
+            y=round(self.y * factor),
+            w=round(self.w * factor),
+            h=round(self.h * factor),
+        )
+
+    def clamped(self, max_width: int, max_height: int) -> 'CaptureRegion':
+        """Return a new region clamped to fit within *max_width* x *max_height*.
+
+        Handles partially off-screen regions by shrinking the region so
+        that it stays within bounds.  If the region starts beyond the
+        bounds the result will have zero width/height.
+        """
+        x = max(0, min(self.x, max_width))
+        y = max(0, min(self.y, max_height))
+        w = max(0, min(self.w, max_width - x))
+        h = max(0, min(self.h, max_height - y))
+        return CaptureRegion(name=self.name, x=x, y=y, w=w, h=h)
+
+    def is_within_bounds(self, max_width: int, max_height: int) -> bool:
+        """Check if the region is fully within the given bounds."""
+        return (
+            self.x >= 0 and self.y >= 0
+            and self.x + self.w <= max_width
+            and self.y + self.h <= max_height
+        )
+
 
 # Default capture regions for the Guandan game UI
 # These are approximate and may need calibration per resolution
@@ -178,20 +219,28 @@ def capture_window(window: WindowInfo) -> Optional['Image.Image']:
     return screen.crop(window.rect)
 
 
-def capture_region(window: WindowInfo, region: CaptureRegion) -> Optional['Image.Image']:
-    """Capture a specific region of the game window."""
+def capture_region(
+    window: WindowInfo,
+    region: CaptureRegion,
+    dpi_scale: float = 1.0,
+) -> Optional['Image.Image']:
+    """Capture a specific region of the game window.
+
+    If *dpi_scale* is not 1.0 the region coordinates are scaled before
+    cropping, allowing regions designed at 1x to work on HiDPI displays.
+    The region is always clamped to the captured image bounds so that
+    partially off-screen windows don't cause errors.
+    """
     full = capture_window(window)
     if full is None:
         return None
 
-    bbox = (region.x, region.y, region.x + region.w, region.y + region.h)
-    # Clamp to window bounds
-    bbox = (
-        max(0, bbox[0]),
-        max(0, bbox[1]),
-        min(full.width, bbox[2]),
-        min(full.height, bbox[3]),
-    )
+    effective = region.scaled(dpi_scale) if dpi_scale != 1.0 else region
+    safe = effective.clamped(full.width, full.height)
+    if not safe.is_valid:
+        return None
+
+    bbox = (safe.x, safe.y, safe.x + safe.w, safe.y + safe.h)
     return full.crop(bbox)
 
 
@@ -204,21 +253,38 @@ def save_screenshot(img: 'Image.Image', path: Path, prefix: str = 'capture') -> 
     return filepath
 
 
+def scale_regions(
+    regions: dict[str, CaptureRegion],
+    factor: float,
+) -> dict[str, CaptureRegion]:
+    """Return a copy of *regions* with all coordinates scaled by *factor*."""
+    return {name: r.scaled(factor) for name, r in regions.items()}
+
+
 class GameCapture:
     """High-level game capture manager."""
 
-    def __init__(self, custom_title: Optional[str] = None,
-                 regions: Optional[dict] = None,
-                 save_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        custom_title: Optional[str] = None,
+        regions: Optional[dict] = None,
+        save_dir: Optional[Path] = None,
+        dpi_scale: float = 1.0,
+    ):
         self.custom_title = custom_title
         self.regions = regions or DEFAULT_REGIONS
         self.save_dir = save_dir or Path('screenshots')
+        self.dpi_scale = dpi_scale
         self._window: Optional[WindowInfo] = None
 
     def find_window(self) -> Optional[WindowInfo]:
         """Find and cache game window."""
         self._window = find_game_window(self.custom_title)
         return self._window
+
+    def refresh_window(self) -> Optional[WindowInfo]:
+        """Re-detect the game window after resolution or position changes."""
+        return self.find_window()
 
     @property
     def window(self) -> Optional[WindowInfo]:
@@ -233,14 +299,23 @@ class GameCapture:
         return capture_window(self._window)
 
     def capture_region_by_name(self, name: str) -> Optional['Image.Image']:
-        """Capture a named region."""
+        """Capture a named region, applying DPI scaling and boundary clamping."""
         if name not in self.regions:
             return None
         if self._window is None:
             self.find_window()
         if self._window is None:
             return None
-        return capture_region(self._window, self.regions[name])
+        return capture_region(self._window, self.regions[name], self.dpi_scale)
+
+    def get_scaled_region(self, name: str) -> Optional[CaptureRegion]:
+        """Return the named region with DPI scaling applied, or None."""
+        if name not in self.regions:
+            return None
+        region = self.regions[name]
+        if self.dpi_scale != 1.0:
+            return region.scaled(self.dpi_scale)
+        return region
 
     def capture_my_hand(self) -> Optional['Image.Image']:
         return self.capture_region_by_name('my_hand')
