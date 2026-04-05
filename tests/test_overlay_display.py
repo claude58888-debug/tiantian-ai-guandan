@@ -99,6 +99,10 @@ class TestOverlayWindow:
         overlay.hide()
         assert overlay.visible is False
 
+    def test_update_noop(self) -> None:
+        overlay = OverlayWindow()
+        overlay.update()  # should not raise
+
     def test_update_position(self) -> None:
         overlay = OverlayWindow()
         overlay.update_position(500, 600)
