@@ -1,7 +1,8 @@
 """Overlay display for AI recommendations (M7).
 
 Console-based output mode - no tkinter dependency.
-Prints recommendations directly to terminal to avoid GUI freeze issues.
+Prints recommendations directly to terminal to
+avoid GUI freeze issues.
 """
 from __future__ import annotations
 
@@ -33,6 +34,7 @@ class OverlayWindow:
     This replaces the tkinter-based overlay to avoid GUI thread freezing.
     Recommendations are printed to stdout with color coding via ANSI codes.
     """
+
     config: OverlayConfig = field(default_factory=OverlayConfig)
     position: Tuple[int, int] = (100, 100)
     _visible: bool = False
@@ -46,12 +48,16 @@ class OverlayWindow:
 
         # Clear line and print
         print(f"\r{' ' * 80}", end="\r")
-        print(f"{color}[AI] {text}  |  {combo_type}  |  confidence: {conf_pct}  |  {reasoning}\033[0m")
+        print(f"{color}[AI] {text} | {combo_type} | confidence: {conf_pct} | {reasoning}\033[0m")
         sys.stdout.flush()
 
     def hide(self) -> None:
         """Hide the overlay (no-op for console mode)."""
         self._visible = False
+
+    def update(self) -> None:
+        """Process pending events (no-op for console mode)."""
+        pass
 
     def update_position(self, x: int, y: int) -> None:
         """Update overlay position (no-op for console mode)."""
