@@ -13,6 +13,7 @@ class Suggestion:
     score: float
     reason: str
     source: str = "rule_based"
+    risk_level: str = "SAFE"
 
 
 @dataclass
@@ -37,9 +38,9 @@ class MainWindowViewModel:
     )
     suggestions: list[Suggestion] = field(
         default_factory=lambda: [
-            Suggestion(["S6", "H6"], "pair", 0.87, "低成本跟牌，保留高价值牌组"),
-            Suggestion(["S5", "H5"], "pair", 0.73, "可以压住，但后续衔接较弱"),
-            Suggestion([], "pass", 0.42, "可选择过牌，观察队友接管"),
+            Suggestion(["S6", "H6"], "pair", 0.87, "低成本跟牌，保留高价值牌组", risk_level="SAFE"),
+            Suggestion(["S5", "H5"], "pair", 0.73, "可以压住，但后续衔接较弱", risk_level="MODERATE"),
+            Suggestion([], "pass", 0.42, "可选择过牌，观察队友接管", risk_level="SAFE"),
         ]
     )
     logs: list[str] = field(
@@ -177,7 +178,7 @@ class GuandanUI(tk.Tk):
             cards = "PASS" if not s.cards else " ".join(s.cards)
             suggestion_lines.append(
                 f"{i}. [{s.combo_type}] {cards}\n"
-                f"   score={s.score:.2f} source={s.source}\n"
+                f"   confidence={s.score:.2f} risk={s.risk_level} source={s.source}\n"
                 f"   reason={s.reason}"
             )
         self._set_text(self.suggestion_text, "\n\n".join(suggestion_lines))
