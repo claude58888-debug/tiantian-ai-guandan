@@ -6,7 +6,7 @@ real-time decision AI overlay.
 Usage::
 
     python -m guandan.main --realtime
-    python -m guandan.main          # falls back to CLI mode
+    python -m guandan.main              # falls back to CLI mode
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from guandan.models import Rank
 
 log = logging.getLogger(__name__)
 
-# Rank label → enum mapping for CLI parsing
+# Rank label -> enum mapping for CLI parsing
 _RANK_LABELS = {r.label(): r for r in Rank}
 
 
@@ -84,6 +84,7 @@ def run_realtime(
     and :class:`RealtimeController`, then runs until interrupted.
     """
     from guandan.card_recognition import CardRecognizer
+    from guandan.card_template_generator import generate_all_templates
     from guandan.decision_engine import DecisionEngine
     from guandan.overlay_display import OverlayWindow
     from guandan.realtime_controller import (
@@ -91,10 +92,16 @@ def run_realtime(
         RealtimeController,
     )
 
-    print(f'Guandan AI — Real-time mode (level={level.label()}, fps={fps})')
+    print(f'Guandan AI -- Real-time mode (level={level.label()}, fps={fps})')
     print('Press Ctrl+C to stop.')
 
-    recognizer = CardRecognizer()
+    recognizer = CardRecognizer(threshold=0.6)
+
+    # Generate and load synthetic card templates
+    templates = generate_all_templates()
+    recognizer.load_templates_from_pil(templates)
+    print(f'Loaded {recognizer.template_count} card templates')
+
     engine = DecisionEngine(
         recognizer=recognizer,
         current_level=level,
@@ -106,10 +113,8 @@ def run_realtime(
         fps=fps,
         enable_hotkeys=enable_hotkeys,
     )
-
     region = GameWindowRegion()
     controller.start(region)
-
     try:
         import time
         while controller.state.name == 'RUNNING':
@@ -120,7 +125,6 @@ def run_realtime(
     finally:
         controller.stop()
         overlay.destroy()
-
     stats = controller.stats
     print(
         f'Done. Frames={stats.frames_processed}, '
@@ -133,13 +137,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     """Main entry point."""
     parser = build_parser()
     args = parser.parse_args(argv)
-
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
         level=log_level,
         format='%(asctime)s %(name)s %(levelname)s: %(message)s',
     )
-
     if args.realtime:
         run_realtime(
             level=args.level,
