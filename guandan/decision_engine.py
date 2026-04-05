@@ -83,6 +83,21 @@ NOT_MY_TURN = Decision(
 
 
 # ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+def _generate_templates_in_memory():
+    """Generate all 54 card templates as PIL images in memory."""
+    from guandan.card_template_generator import get_all_specs, render_template
+    specs = get_all_specs()
+    templates = {}
+    for spec in specs:
+        img = render_template(spec)
+        templates[spec.filename] = img
+    return templates
+
+
+# ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
 
@@ -112,8 +127,7 @@ class DecisionEngine:
 
         # Auto-load synthetic templates if recognizer has none loaded
         if not self._recognizer.is_loaded:
-            from guandan.card_template_generator import generate_all_templates
-            templates = generate_all_templates()
+            templates = _generate_templates_in_memory()
             self._recognizer.load_templates_from_pil(templates)
             log.info('Auto-loaded %d card templates', self._recognizer.template_count)
 
