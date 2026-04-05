@@ -2,12 +2,16 @@
 
 Provides pluggable strategy classes for AI decision-making.
 Strategies range from simple (random, greedy) to advanced.
+
+V0.3 fix (H-2): SmartStrategy now accepts an optional PartnerContext
+so that it adjusts play style when its teammate is winning/leading.
 """
 from __future__ import annotations
 
 import random
 from abc import ABC, abstractmethod
 from collections import Counter
+from dataclasses import dataclass
 from itertools import combinations
 from typing import List, Optional, Tuple
 
@@ -167,11 +171,63 @@ class GreedyStrategy(Strategy):
         return list(beaters[0].cards)
 
 
-class SmartStrategy(Strategy):
-    """Smarter strategy: considers hand structure and teammate."""
+@dataclass(frozen=True)
+class PartnerContext:
+    """Information about the teammate's state.
 
-    def __init__(self, aggression: float = 0.5):
+    Attributes:
+        partner_card_count: Number of cards the partner still holds.
+            Use -1 when the count is unknown.
+        partner_finished: True if the partner has already finished
+            (played all their cards).
+        partner_finish_order: 1-based finish position of the partner
+            (0 if not finished yet).
+    """
+    partner_card_count: int = -1
+    partner_finished: bool = False
+    partner_finish_order: int = 0
+
+
+class SmartStrategy(Strategy):
+    """Smarter strategy: considers hand structure and teammate.
+
+    When a PartnerContext is supplied, the strategy adjusts:
+    - Partner about to finish (<=3 cards): play conservatively so
+      the partner can win the trick and go out first.
+    - Partner already finished: play aggressively to follow up and
+      secure a good finish-order result for the team.
+    - Partner far from finishing: play normally.
+    """
+
+    def __init__(
+        self,
+        aggression: float = 0.5,
+        partner: Optional[PartnerContext] = None,
+    ):
         self.aggression = max(0.0, min(1.0, aggression))
+        self.partner = partner
+
+    def set_partner(self, partner: PartnerContext) -> None:
+        """Update partner context (e.g. after each trick)."""
+        self.partner = partner
+
+    # ------------------------------------------------------------------
+    # Effective aggression accounting for partner state
+    # ------------------------------------------------------------------
+    def _effective_aggression(self) -> float:
+        """Compute an aggression modifier based on partner state."""
+        if self.partner is None:
+            return self.aggression
+
+        # Partner already finished -> play aggressively to follow quickly
+        if self.partner.partner_finished:
+            return min(1.0, self.aggression + 0.3)
+
+        # Partner about to finish (few cards) -> play conservatively
+        if 0 <= self.partner.partner_card_count <= 3:
+            return max(0.0, self.aggression - 0.3)
+
+        return self.aggression
 
     def _hand_strength(self, cards: List[Card], level: Rank) -> float:
         """Estimate hand strength 0-1."""
@@ -187,8 +243,21 @@ class SmartStrategy(Strategy):
         if not cards:
             return None
         strength = self._hand_strength(cards, level)
-        # Strong hand: lead aggressively with pairs/triples
-        if strength > 0.6 or self.aggression > 0.7:
+        eff_aggro = self._effective_aggression()
+
+        # When partner is about to finish, lead with smallest single
+        # to avoid winning tricks the partner could use to go out.
+        if (self.partner is not None
+                and not self.partner.partner_finished
+                and 0 <= self.partner.partner_card_count <= 3):
+            singles = find_all_singles(cards, level)
+            if singles:
+                singles.sort(key=lambda c: c.rank_key)
+                return list(singles[0].cards)
+            return [cards[0]]
+
+        # Strong hand or aggressive: lead with pairs/triples
+        if strength > 0.6 or eff_aggro > 0.7:
             pairs = find_all_pairs(cards, level)
             if pairs:
                 pairs.sort(key=lambda c: c.rank_key)
@@ -207,13 +276,22 @@ class SmartStrategy(Strategy):
         if not beaters:
             return None
         strength = self._hand_strength(cards, level)
+        eff_aggro = self._effective_aggression()
         non_bombs = [b for b in beaters if not b.is_bomb]
+
+        # When partner is about to finish, prefer to pass so
+        # the partner can win the trick and clear their last cards.
+        if (self.partner is not None
+                and not self.partner.partner_finished
+                and 0 <= self.partner.partner_card_count <= 3):
+            return None  # pass to let partner finish
+
         # If hand is strong or high aggression, always respond
         if non_bombs:
             non_bombs.sort(key=lambda c: c.rank_key)
             return list(non_bombs[0].cards)
         # Use bombs only if hand is strong enough or few cards left
-        if len(cards) <= 4 or strength > 0.5 or self.aggression > 0.8:
+        if len(cards) <= 4 or strength > 0.5 or eff_aggro > 0.8:
             beaters.sort(key=lambda c: (c.combo_type.value, c.rank_key))
             return list(beaters[0].cards)
         return None  # pass, save bombs
