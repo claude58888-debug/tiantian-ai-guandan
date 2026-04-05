@@ -39,6 +39,9 @@ from guandan.game_screen_analyzer import ScreenRegions
 from guandan.models import Rank
 from guandan.overlay_display import OverlayConfig, OverlayWindow
 
+# Default calibration file path
+DEFAULT_CALIBRATION_PATH = 'calibration.json'
+
 log = logging.getLogger(__name__)
 
 
@@ -141,6 +144,7 @@ class RealtimeController:
         on_decision: Optional[Callable[[Decision], None]] = None,
         enable_hotkeys: bool = False,
         capture_fn: Optional[Callable[[GameWindowRegion], Optional['Image.Image']]] = None,
+        calibration_path: Optional[str] = None,
     ) -> None:
         self._engine = engine or DecisionEngine()
         self._overlay = overlay
@@ -149,6 +153,13 @@ class RealtimeController:
         self._enable_hotkeys = enable_hotkeys
         self._capture_fn = capture_fn or capture_game_window
         self._region = GameWindowRegion()
+        self._calibration_path = calibration_path
+
+        # Auto-load calibration if path provided or default exists
+        if calibration_path is not None:
+            self._auto_load_calibration(calibration_path)
+        else:
+            self._auto_load_calibration(DEFAULT_CALIBRATION_PATH)
 
         self._stats = ControllerStats()
         self._thread: Optional[threading.Thread] = None
@@ -243,6 +254,20 @@ class RealtimeController:
         """Update the game window region without stopping the loop."""
         self._region = region
         log.info('Recalibrated to %s', region)
+
+    def _auto_load_calibration(self, path: str) -> None:
+        """Try to load calibration data and apply to the engine's analyzer."""
+        from pathlib import Path as _Path
+        cal_path = _Path(path)
+        if not cal_path.exists():
+            log.debug('No calibration file at %s', path)
+            return
+        try:
+            analyzer = self._engine.analyzer
+            analyzer._try_load_calibration(path)
+            log.info('Auto-loaded calibration from %s', path)
+        except Exception:
+            log.debug('Failed to auto-load calibration', exc_info=True)
 
     # -- main loop ---------------------------------------------------------
 
