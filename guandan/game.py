@@ -5,9 +5,13 @@ and level advancement for a complete Guandan game.
 
 Teams: Players 0,2 vs Players 1,3 (seated across from partner).
 Levels: Both teams start at 2, first to pass Ace wins.
+
+V0.3 fix (C-3): State transitions are now atomic. If an error occurs
+mid-transition the state rolls back to the previous valid snapshot.
 """
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from enum import Enum, unique
 from typing import List, Optional, Sequence, Tuple
@@ -15,6 +19,10 @@ from typing import List, Optional, Sequence, Tuple
 from guandan.models import Card, Deck, Hand, Rank
 from guandan.combos import Combo, ComboType, classify_combo
 from guandan.compare import can_beat
+
+
+class StateTransactionError(Exception):
+    """Raised when a state transition fails and has been rolled back."""
 
 
 @unique
@@ -87,13 +95,55 @@ class GameState:
     def active_player_count(self) -> int:
         return sum(1 for p in self.players if not p.finished)
 
+    def _snapshot(self) -> dict:
+        """Capture a deep copy of all mutable state fields."""
+        return {
+            'players': copy.deepcopy(self.players),
+            'current_player': self.current_player,
+            'phase': self.phase,
+            'last_play': self.last_play,
+            'last_player': self.last_player,
+            'pass_count': self.pass_count,
+            'finish_order': list(self.finish_order),
+            'trick_starter': self.trick_starter,
+            'history': list(self.history),
+        }
+
+    def _restore(self, snap: dict) -> None:
+        """Restore state from a snapshot."""
+        self.players = snap['players']
+        self.current_player = snap['current_player']
+        self.phase = snap['phase']
+        self.last_play = snap['last_play']
+        self.last_player = snap['last_player']
+        self.pass_count = snap['pass_count']
+        self.finish_order = snap['finish_order']
+        self.trick_starter = snap['trick_starter']
+        self.history = snap['history']
+
     def play_cards(self, player_idx: int, cards: Sequence[Card]) -> bool:
-        """Attempt to play cards. Returns True if successful."""
+        """Attempt to play cards. Returns True if successful.
+
+        The transition is atomic: if any step raises an exception the
+        entire state is rolled back to the pre-call snapshot.
+        """
+        # Cheap validation that doesn't mutate state
         if self.phase != Phase.PLAYING:
             return False
         if player_idx != self.current_player:
             return False
 
+        snap = self._snapshot()
+        try:
+            return self._play_cards_inner(player_idx, cards)
+        except Exception as exc:
+            self._restore(snap)
+            raise StateTransactionError(
+                f'State rolled back after error in play_cards: {exc}'
+            ) from exc
+
+    def _play_cards_inner(self, player_idx: int, cards: Sequence[Card]) -> bool:
+        """Core logic for play_cards (called inside the transaction)."""
         player = self.players[player_idx]
 
         # Pass (empty cards)

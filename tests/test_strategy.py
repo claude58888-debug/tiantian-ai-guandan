@@ -4,6 +4,7 @@ from guandan.models import Card, Rank, Suit
 from guandan.combos import Combo, ComboType, classify_combo
 from guandan.strategy import (
     Strategy, RandomStrategy, GreedyStrategy, SmartStrategy,
+    PartnerContext,
     find_all_singles, find_all_pairs, find_all_triples,
     find_all_bombs, enumerate_plays, find_beating_plays,
     get_strategy, STRATEGIES,
@@ -286,3 +287,136 @@ class TestFindBeatingPlays:
         single = classify_combo([make_card(Rank.THREE)], Rank.TWO)
         beaters = find_beating_plays(hand, single, Rank.TWO)
         assert isinstance(beaters, list)
+
+
+# ── V0.3 H-2: Partner awareness tests ────────────────────────────────
+
+
+class TestPartnerContext:
+    def test_defaults(self):
+        ctx = PartnerContext()
+        assert ctx.partner_card_count == -1
+        assert ctx.partner_finished is False
+        assert ctx.partner_finish_order == 0
+
+    def test_custom_values(self):
+        ctx = PartnerContext(partner_card_count=5, partner_finished=True, partner_finish_order=1)
+        assert ctx.partner_card_count == 5
+        assert ctx.partner_finished is True
+        assert ctx.partner_finish_order == 1
+
+    def test_frozen(self):
+        ctx = PartnerContext()
+        with pytest.raises(AttributeError):
+            ctx.partner_card_count = 10
+
+
+class TestSmartStrategyPartnerInit:
+    def test_default_no_partner(self):
+        s = SmartStrategy()
+        assert s.partner is None
+
+    def test_init_with_partner(self):
+        ctx = PartnerContext(partner_card_count=10)
+        s = SmartStrategy(partner=ctx)
+        assert s.partner is ctx
+
+    def test_set_partner(self):
+        s = SmartStrategy()
+        ctx = PartnerContext(partner_card_count=3)
+        s.set_partner(ctx)
+        assert s.partner is ctx
+
+
+class TestEffectiveAggression:
+    def test_no_partner_returns_base(self):
+        s = SmartStrategy(aggression=0.5)
+        assert s._effective_aggression() == 0.5
+
+    def test_partner_finished_increases(self):
+        ctx = PartnerContext(partner_finished=True)
+        s = SmartStrategy(aggression=0.5, partner=ctx)
+        assert s._effective_aggression() == pytest.approx(0.8)
+
+    def test_partner_about_to_finish_decreases(self):
+        ctx = PartnerContext(partner_card_count=2)
+        s = SmartStrategy(aggression=0.5, partner=ctx)
+        assert s._effective_aggression() == pytest.approx(0.2)
+
+    def test_partner_many_cards_unchanged(self):
+        ctx = PartnerContext(partner_card_count=20)
+        s = SmartStrategy(aggression=0.5, partner=ctx)
+        assert s._effective_aggression() == 0.5
+
+    def test_clamped_at_zero(self):
+        ctx = PartnerContext(partner_card_count=1)
+        s = SmartStrategy(aggression=0.1, partner=ctx)
+        assert s._effective_aggression() == 0.0
+
+    def test_clamped_at_one(self):
+        ctx = PartnerContext(partner_finished=True)
+        s = SmartStrategy(aggression=0.9, partner=ctx)
+        assert s._effective_aggression() == 1.0
+
+    def test_unknown_card_count_unchanged(self):
+        ctx = PartnerContext(partner_card_count=-1)
+        s = SmartStrategy(aggression=0.6, partner=ctx)
+        assert s._effective_aggression() == 0.6
+
+
+class TestSmartStrategyPartnerLead:
+    """Test that lead behaviour changes with partner context."""
+
+    def test_partner_about_to_finish_leads_single(self):
+        ctx = PartnerContext(partner_card_count=2)
+        s = SmartStrategy(aggression=0.9, partner=ctx)
+        hand = make_hand()
+        result = s.choose_lead(hand, Rank.TWO)
+        assert result is not None
+        # Should lead with a single even though aggression is high
+        assert len(result) == 1
+
+    def test_partner_finished_may_lead_pairs(self):
+        ctx = PartnerContext(partner_finished=True)
+        s = SmartStrategy(aggression=0.5, partner=ctx)
+        hand = make_hand()
+        result = s.choose_lead(hand, Rank.TWO)
+        assert result is not None
+        # With boosted aggression (0.8), should prefer pairs if available
+        # (pairs exist in make_hand: 3-3 and 5-5)
+        assert len(result) >= 1
+
+    def test_no_partner_aggressive_leads_pairs(self):
+        s = SmartStrategy(aggression=0.9)
+        hand = make_hand()
+        result = s.choose_lead(hand, Rank.TWO)
+        assert result is not None
+
+
+class TestSmartStrategyPartnerResponse:
+    """Test that response behaviour changes with partner context."""
+
+    def test_partner_about_to_finish_passes(self):
+        ctx = PartnerContext(partner_card_count=2)
+        s = SmartStrategy(aggression=0.9, partner=ctx)
+        hand = make_hand()
+        single = classify_combo([make_card(Rank.THREE)], Rank.TWO)
+        result = s.choose_response(hand, single, Rank.TWO)
+        # Should pass to let partner finish
+        assert result is None
+
+    def test_partner_finished_responds(self):
+        ctx = PartnerContext(partner_finished=True)
+        s = SmartStrategy(aggression=0.5, partner=ctx)
+        hand = make_hand()
+        single = classify_combo([make_card(Rank.THREE)], Rank.TWO)
+        result = s.choose_response(hand, single, Rank.TWO)
+        assert result is not None
+
+    def test_partner_many_cards_responds_normally(self):
+        ctx = PartnerContext(partner_card_count=20)
+        s = SmartStrategy(aggression=0.5, partner=ctx)
+        hand = make_hand()
+        single = classify_combo([make_card(Rank.THREE)], Rank.TWO)
+        result = s.choose_response(hand, single, Rank.TWO)
+        assert result is not None

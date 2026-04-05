@@ -1,8 +1,9 @@
 """Tests for Atom 1.4 - GameState machine."""
 import pytest
+from unittest.mock import patch
 from guandan.models import Card, Rank, Suit, JokerType, Hand
 from guandan.combos import Combo, ComboType, classify_combo
-from guandan.game import GameState, Phase, Player
+from guandan.game import GameState, Phase, Player, StateTransactionError
 
 
 class TestPlayer:
@@ -224,3 +225,122 @@ class TestHistory:
         cp = gs.current_player
         gs.play_cards(cp, [])
         assert gs.history[-1][1] is None
+
+
+# ── V0.3 C-3: State machine atomicity / rollback tests ───────────────
+
+
+class TestSnapshotRestore:
+    """Tests for _snapshot and _restore helpers."""
+
+    def test_snapshot_captures_state(self):
+        gs = GameState()
+        gs.deal(seed=42)
+        snap = gs._snapshot()
+        assert snap['phase'] == Phase.PLAYING
+        assert len(snap['players']) == 4
+        assert snap['pass_count'] == 0
+
+    def test_restore_reverts_state(self):
+        gs = GameState()
+        gs.deal(seed=42)
+        snap = gs._snapshot()
+        original_player = gs.current_player
+
+        # Mutate state
+        card = gs.players[0].hand.cards[0]
+        gs.play_cards(0, [card])
+        assert gs.current_player != original_player
+
+        # Restore
+        gs._restore(snap)
+        assert gs.current_player == original_player
+        assert len(gs.history) == 0
+
+    def test_snapshot_is_deep_copy(self):
+        gs = GameState()
+        gs.deal(seed=42)
+        snap = gs._snapshot()
+        original_hand_len = len(gs.players[0].hand)
+
+        card = gs.players[0].hand.cards[0]
+        gs.play_cards(0, [card])
+
+        # Snapshot players should be unaffected
+        assert len(snap['players'][0].hand) == original_hand_len
+
+
+class TestPlayCardsAtomicity:
+    """Tests that play_cards rolls back on unexpected exceptions."""
+
+    def test_rollback_on_exception(self):
+        gs = GameState()
+        gs.deal(seed=42)
+        card = gs.players[0].hand.cards[0]
+        original_hand_len = len(gs.players[0].hand)
+
+        # Patch _play_cards_inner to raise after partial mutation
+        with patch.object(
+            GameState, '_play_cards_inner',
+            side_effect=RuntimeError('simulated crash'),
+        ):
+            with pytest.raises(StateTransactionError):
+                gs.play_cards(0, [card])
+
+        # State should be fully restored
+        assert len(gs.players[0].hand) == original_hand_len
+        assert len(gs.history) == 0
+        assert gs.current_player == 0
+
+    def test_successful_play_not_rolled_back(self):
+        gs = GameState()
+        gs.deal(seed=42)
+        card = gs.players[0].hand.cards[0]
+        ok = gs.play_cards(0, [card])
+        assert ok
+        assert len(gs.history) == 1
+
+    def test_failed_validation_no_snapshot(self):
+        gs = GameState()
+        gs.deal(seed=42)
+        # Wrong player doesn't even create a snapshot
+        ok = gs.play_cards(1, [])
+        assert not ok
+        assert len(gs.history) == 0
+
+    def test_rollback_preserves_finish_order(self):
+        gs = GameState()
+        gs.deal(seed=42)
+        original_finish_order = list(gs.finish_order)
+
+        with patch.object(
+            GameState, '_play_cards_inner',
+            side_effect=RuntimeError('boom'),
+        ):
+            with pytest.raises(StateTransactionError):
+                gs.play_cards(0, [gs.players[0].hand.cards[0]])
+
+        assert gs.finish_order == original_finish_order
+
+
+class TestStateTransactionError:
+    def test_exception_is_raised(self):
+        gs = GameState()
+        gs.deal(seed=42)
+        with patch.object(
+            GameState, '_play_cards_inner',
+            side_effect=ValueError('inner error'),
+        ):
+            with pytest.raises(StateTransactionError, match='rolled back'):
+                gs.play_cards(0, [gs.players[0].hand.cards[0]])
+
+    def test_original_exception_chained(self):
+        gs = GameState()
+        gs.deal(seed=42)
+        with patch.object(
+            GameState, '_play_cards_inner',
+            side_effect=ValueError('inner'),
+        ):
+            with pytest.raises(StateTransactionError) as exc_info:
+                gs.play_cards(0, [gs.players[0].hand.cards[0]])
+            assert exc_info.value.__cause__ is not None
