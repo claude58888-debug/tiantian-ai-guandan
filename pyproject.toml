@@ -13,6 +13,8 @@ dependencies = [
     "Pillow>=10.0",
     "scikit-image>=0.21",
     "numpy>=1.24",
+    "easyocr>=1.7",
+    "pynput>=1.7",
 ]
 
 [project.scripts]
