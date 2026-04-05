@@ -114,7 +114,7 @@ class CardCounter:
 
     def _card_key(self, card: Card) -> str:
         """Create a counting key for a card."""
-        if card.joker:
+                if card.joker is not None:
             return f"JOKER_{card.joker.name}"
         return f"{card.rank.name}" if card.rank else "UNKNOWN"
 
