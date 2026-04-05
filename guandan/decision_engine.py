@@ -1,9 +1,9 @@
 """Real-time AI decision engine for Guandan (M7).
 
 Integrates:
-- GameScreenAnalyzer  (screen → state)
+- GameScreenAnalyzer  (screen -> state)
 - CardRecognizer      (template matching)
-- SuggestionEngine    (strategy + card_counter → top-N plays)
+- SuggestionEngine    (strategy + card_counter -> top-N plays)
 - CardCounter         (risk assessment)
 
 to produce a single :class:`Decision` for the current game frame.
@@ -52,6 +52,7 @@ class Decision:
     latency_ms : float
         Time taken to produce this decision (milliseconds).
     """
+
     cards_to_play: Tuple[Card, ...] = ()
     combo_type: str = 'pass'
     confidence: float = 0.0
@@ -108,6 +109,14 @@ class DecisionEngine:
         top_n: int = 3,
     ) -> None:
         self._recognizer = recognizer or CardRecognizer()
+
+        # Auto-load synthetic templates if recognizer has none loaded
+        if not self._recognizer.is_loaded:
+            from guandan.card_template_generator import generate_all_templates
+            templates = generate_all_templates()
+            self._recognizer.load_templates_from_pil(templates)
+            log.info('Auto-loaded %d card templates', self._recognizer.template_count)
+
         self._analyzer = GameScreenAnalyzer(
             recognizer=self._recognizer,
             regions=regions,
@@ -186,6 +195,7 @@ class DecisionEngine:
 
         # 7. Get suggestions
         suggestions = self._suggestion.suggest(hand, last_combo)
+
         if not suggestions:
             return Decision(
                 reasoning='No valid plays available',
@@ -205,9 +215,9 @@ class DecisionEngine:
     def decide_for_tribute(self, screenshot: 'Image.Image') -> Decision:
         """Specialised decision for the tribute phase.
 
-        During tribute, the player must give a specific card to
-        another player.  This returns a simple heuristic: give the
-        lowest non-bomb single.
+        During tribute, the player must give a specific card to another
+        player.  This returns a simple heuristic: give the lowest
+        non-bomb single.
         """
         t0 = time.monotonic()
         hand = self._analyzer.detect_hand_cards(screenshot)
@@ -216,7 +226,6 @@ class DecisionEngine:
                 reasoning='Could not detect hand for tribute',
                 latency_ms=_elapsed_ms(t0),
             )
-
         # Pick lowest non-joker card
         non_jokers = [c for c in hand if not c.is_joker]
         target = non_jokers[0] if non_jokers else hand[0]
@@ -245,7 +254,7 @@ class DecisionEngine:
             else:
                 self._last_combo = None
 
-        # Centre cleared → new trick, we lead
+        # Centre cleared -> new trick, we lead
         if not played and self._last_played:
             self._last_combo = None
 
