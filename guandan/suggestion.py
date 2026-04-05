@@ -9,18 +9,15 @@ a risk level tag, and a confidence score (0.0-1.0).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from guandan.card_counter import CardCounter, RiskLevel, RiskReport
 from guandan.combos import Combo, ComboType, classify_combo
-from guandan.compare import can_beat
 from guandan.models import Card, Rank
 from guandan.strategy import (
-    SmartStrategy,
     enumerate_plays,
-    find_all_bombs,
     find_beating_plays,
 )
 
