@@ -73,6 +73,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _generate_templates_in_memory():
+    """Generate all 54 card templates as PIL images in memory.
+
+    Returns a dict of {name: PIL.Image} suitable for
+    CardRecognizer.load_templates_from_pil().
+    """
+    from guandan.card_template_generator import get_all_specs, render_template
+    specs = get_all_specs()
+    templates = {}
+    for spec in specs:
+        img = render_template(spec)
+        templates[spec.filename] = img
+    return templates
+
+
 def run_realtime(
     level: Rank = Rank.TWO,
     fps: float = 3.0,
@@ -84,7 +99,6 @@ def run_realtime(
     and :class:`RealtimeController`, then runs until interrupted.
     """
     from guandan.card_recognition import CardRecognizer
-    from guandan.card_template_generator import generate_all_templates
     from guandan.decision_engine import DecisionEngine
     from guandan.overlay_display import OverlayWindow
     from guandan.realtime_controller import (
@@ -97,8 +111,8 @@ def run_realtime(
 
     recognizer = CardRecognizer(threshold=0.6)
 
-    # Generate and load synthetic card templates
-    templates = generate_all_templates()
+    # Generate and load synthetic card templates in memory
+    templates = _generate_templates_in_memory()
     recognizer.load_templates_from_pil(templates)
     print(f'Loaded {recognizer.template_count} card templates')
 
