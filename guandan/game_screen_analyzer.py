@@ -41,6 +41,17 @@ except ImportError:
 from guandan.models import Card, Rank, Suit, JokerType
 from guandan.card_recognition import CardRecognizer, RecognizedCard
 
+# Lazy import to avoid circular dependency at module level
+_GameSpecificRecognizer = None
+
+def _get_game_specific_recognizer_cls() -> type:
+    """Lazily import GameSpecificRecognizer to avoid circular imports."""
+    global _GameSpecificRecognizer  # noqa: PLW0603
+    if _GameSpecificRecognizer is None:
+        from guandan.game_specific_recognizer import GameSpecificRecognizer
+        _GameSpecificRecognizer = GameSpecificRecognizer
+    return _GameSpecificRecognizer
+
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -211,11 +222,39 @@ class GameScreenAnalyzer:
         recognizer: Optional[CardRecognizer] = None,
         regions: Optional[ScreenRegions] = None,
         ocr_langs: Optional[List[str]] = None,
+        calibration_path: Optional[str] = None,
     ) -> None:
         self._recognizer = recognizer or CardRecognizer()
         self._regions = regions or DEFAULT_REGIONS
         self._ocr_langs = ocr_langs or ['en']
         self._ocr_reader: Optional['easyocr.Reader'] = None
+        self._calibration_path = calibration_path
+
+        # If calibration data exists, upgrade to GameSpecificRecognizer
+        if calibration_path is not None:
+            self._try_load_calibration(calibration_path)
+
+    def _try_load_calibration(self, path: str) -> None:
+        """Load calibration and upgrade recognizer if possible."""
+        from pathlib import Path
+        cal_path = Path(path)
+        if not cal_path.exists():
+            log.debug('Calibration file not found: %s', path)
+            return
+        try:
+            from guandan.calibration import CalibrationData
+            import json
+            with open(cal_path, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+            cal_data = CalibrationData.from_dict(raw)
+            gsr_cls = _get_game_specific_recognizer_cls()
+            self._recognizer = gsr_cls(calibration=cal_data)
+            regions = cal_data.to_screen_regions()
+            if cal_data.screen_regions:
+                self._regions = regions
+            log.info('Loaded calibration from %s', path)
+        except Exception:
+            log.warning('Failed to load calibration from %s', path, exc_info=True)
 
     # -- properties --------------------------------------------------------
 
