@@ -17,6 +17,9 @@ dependencies = [
     "pynput>=1.7",
 ]
 
+[tool.setuptools.packages.find]
+include = ["guandan*"]
+
 [project.scripts]
 guandan = "guandan.cli:main"
 
