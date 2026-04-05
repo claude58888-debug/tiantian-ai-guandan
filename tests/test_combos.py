@@ -1,7 +1,10 @@
 """Tests for Atom 1.2/1.3 - Combo recognition and comparison."""
 import pytest
 from guandan.models import Card, Rank, Suit, JokerType
-from guandan.combos import classify_combo, ComboType, is_valid_play
+from guandan.combos import (
+    classify_combo, ComboType, is_valid_play,
+    _valid_sequence_ranks, _SEQUENCE_RANK_MIN, _SEQUENCE_RANK_MAX,
+)
 from guandan.compare import can_beat
 
 
@@ -99,3 +102,106 @@ class TestCanBeat:
         p = classify_combo([])
         s = classify_combo([c(Rank.TWO, Suit.HEARTS)])
         assert can_beat(s, p)
+
+
+# ── V0.3 H-4: Straight / sequence detection edge cases ───────────────
+
+
+class TestValidSequenceRanks:
+    def test_normal_range(self):
+        assert _valid_sequence_ranks([3, 4, 5, 6, 7])
+
+    def test_excludes_two(self):
+        assert not _valid_sequence_ranks([2, 3, 4, 5, 6])
+
+    def test_excludes_joker(self):
+        assert not _valid_sequence_ranks([10, 11, 12, 100])
+
+    def test_ace_is_valid(self):
+        assert _valid_sequence_ranks([10, 11, 12, 13, 14])
+
+    def test_constants(self):
+        assert _SEQUENCE_RANK_MIN == 3
+        assert _SEQUENCE_RANK_MAX == 14
+
+
+class TestStraightEdgeCases:
+    def test_valid_low_straight(self):
+        cards = [c(Rank.THREE, Suit.HEARTS), c(Rank.FOUR, Suit.CLUBS),
+                 c(Rank.FIVE, Suit.DIAMONDS), c(Rank.SIX, Suit.SPADES),
+                 c(Rank.SEVEN, Suit.HEARTS)]
+        combo = classify_combo(cards)
+        assert combo is not None
+        assert combo.combo_type == ComboType.STRAIGHT
+
+    def test_valid_high_straight(self):
+        cards = [c(Rank.TEN, Suit.HEARTS), c(Rank.JACK, Suit.CLUBS),
+                 c(Rank.QUEEN, Suit.DIAMONDS), c(Rank.KING, Suit.SPADES),
+                 c(Rank.ACE, Suit.HEARTS)]
+        combo = classify_combo(cards)
+        assert combo is not None
+        assert combo.combo_type == ComboType.STRAIGHT
+
+    def test_straight_with_two_rejected(self):
+        # 2-3-4-5-6 should NOT be a straight in Guandan
+        cards = [c(Rank.TWO, Suit.HEARTS), c(Rank.THREE, Suit.CLUBS),
+                 c(Rank.FOUR, Suit.DIAMONDS), c(Rank.FIVE, Suit.SPADES),
+                 c(Rank.SIX, Suit.HEARTS)]
+        combo = classify_combo(cards)
+        assert combo is None
+
+    def test_no_wrapping_kqa23(self):
+        # K-A-2-3-4 wrapping should be invalid
+        cards = [c(Rank.KING, Suit.HEARTS), c(Rank.ACE, Suit.CLUBS),
+                 c(Rank.TWO, Suit.DIAMONDS), c(Rank.THREE, Suit.SPADES),
+                 c(Rank.FOUR, Suit.HEARTS)]
+        combo = classify_combo(cards)
+        assert combo is None
+
+    def test_straight_with_level_rank(self):
+        # When level is FIVE, non-wild 5s should still form straights
+        cards = [c(Rank.THREE, Suit.SPADES), c(Rank.FOUR, Suit.CLUBS),
+                 c(Rank.FIVE, Suit.DIAMONDS), c(Rank.SIX, Suit.SPADES),
+                 c(Rank.SEVEN, Suit.HEARTS)]
+        combo = classify_combo(cards, level=Rank.FIVE)
+        assert combo is not None
+        assert combo.combo_type == ComboType.STRAIGHT
+
+    def test_six_card_straight(self):
+        cards = [c(Rank(r), Suit.HEARTS) for r in range(3, 9)]
+        combo = classify_combo(cards)
+        assert combo is not None
+        assert combo.combo_type == ComboType.STRAIGHT
+        assert combo.size == 6
+
+
+class TestConsecutivePairsEdgeCases:
+    def test_valid_consecutive_pairs(self):
+        cards = [c(Rank.THREE, Suit.HEARTS), c(Rank.THREE, Suit.CLUBS),
+                 c(Rank.FOUR, Suit.HEARTS), c(Rank.FOUR, Suit.CLUBS),
+                 c(Rank.FIVE, Suit.HEARTS), c(Rank.FIVE, Suit.CLUBS)]
+        combo = classify_combo(cards)
+        assert combo is not None
+        assert combo.combo_type == ComboType.CONSECUTIVE_PAIRS
+
+    def test_consecutive_pairs_with_two_rejected(self):
+        cards = [c(Rank.TWO, Suit.HEARTS), c(Rank.TWO, Suit.CLUBS),
+                 c(Rank.THREE, Suit.HEARTS), c(Rank.THREE, Suit.CLUBS),
+                 c(Rank.FOUR, Suit.HEARTS), c(Rank.FOUR, Suit.CLUBS)]
+        combo = classify_combo(cards)
+        assert combo is None
+
+
+class TestPlateEdgeCases:
+    def test_valid_plate(self):
+        cards = [c(Rank.THREE, Suit.HEARTS), c(Rank.THREE, Suit.CLUBS), c(Rank.THREE, Suit.DIAMONDS),
+                 c(Rank.FOUR, Suit.HEARTS), c(Rank.FOUR, Suit.CLUBS), c(Rank.FOUR, Suit.DIAMONDS)]
+        combo = classify_combo(cards)
+        assert combo is not None
+        assert combo.combo_type == ComboType.PLATE
+
+    def test_plate_with_two_rejected(self):
+        cards = [c(Rank.TWO, Suit.HEARTS), c(Rank.TWO, Suit.CLUBS), c(Rank.TWO, Suit.DIAMONDS),
+                 c(Rank.THREE, Suit.HEARTS), c(Rank.THREE, Suit.CLUBS), c(Rank.THREE, Suit.DIAMONDS)]
+        combo = classify_combo(cards)
+        assert combo is None

@@ -63,12 +63,27 @@ class Combo:
         return f'Combo({names[self.combo_type]}, [{cards_str}], key={self.rank_key})'
 
 
+# Minimum rank value allowed in sequence combos (straights, consecutive
+# pairs, plates).  In standard Guandan, TWO (rank_value 2) cannot appear
+# in any sequence.
+_SEQUENCE_RANK_MIN = 3   # Rank.THREE
+_SEQUENCE_RANK_MAX = 14  # Rank.ACE
+
+
 def _rank_values(cards: Sequence[Card], level: Rank = Rank.TWO) -> List[int]:
     return sorted(c.rank_value(level) for c in cards)
 
 
 def _rank_counter(cards: Sequence[Card], level: Rank = Rank.TWO) -> Counter:
     return Counter(c.rank_value(level) for c in cards)
+
+
+def _valid_sequence_ranks(ranks: List[int]) -> bool:
+    """Return True if every rank value is within the legal sequence range.
+
+    Excludes jokers (rank_value >= 100) and TWO (rank_value 2).
+    """
+    return all(_SEQUENCE_RANK_MIN <= r <= _SEQUENCE_RANK_MAX for r in ranks)
 
 
 def classify_combo(cards: Sequence[Card], level: Rank = Rank.TWO) -> Optional[Combo]:
@@ -118,25 +133,25 @@ def classify_combo(cards: Sequence[Card], level: Rank = Rank.TWO) -> Optional[Co
         triple_rank = [r for r, c in rc.items() if c == 3][0]
         return Combo(ComboType.FULL_HOUSE, t_cards, triple_rank)
 
-    # Straight: 5+ consecutive singles
-    if n >= 5 and distinct == n and all(c not in rv for c in [100, 101]):
-        if rv[-1] - rv[0] == n - 1 and all(cnt == 1 for cnt in counts):
+    # Straight: 5+ consecutive singles (no jokers, no TWOs)
+    if n >= 5 and distinct == n and all(cnt == 1 for cnt in counts):
+        if _valid_sequence_ranks(rv) and rv[-1] - rv[0] == n - 1:
             return Combo(ComboType.STRAIGHT, t_cards, rv[-1])
 
     # Consecutive pairs: 3+ consecutive pairs (6+ cards)
     if n >= 6 and n % 2 == 0 and all(c == 2 for c in counts):
         ranks_sorted = sorted(rc.keys())
         if (len(ranks_sorted) >= 3 and
-            ranks_sorted[-1] - ranks_sorted[0] == len(ranks_sorted) - 1 and
-            all(r < 100 for r in ranks_sorted)):
+            _valid_sequence_ranks(ranks_sorted) and
+            ranks_sorted[-1] - ranks_sorted[0] == len(ranks_sorted) - 1):
             return Combo(ComboType.CONSECUTIVE_PAIRS, t_cards, ranks_sorted[-1])
 
     # Plate: 2+ consecutive triples (6+ cards)
     if n >= 6 and n % 3 == 0 and all(c == 3 for c in counts):
         ranks_sorted = sorted(rc.keys())
         if (len(ranks_sorted) >= 2 and
-            ranks_sorted[-1] - ranks_sorted[0] == len(ranks_sorted) - 1 and
-            all(r < 100 for r in ranks_sorted)):
+            _valid_sequence_ranks(ranks_sorted) and
+            ranks_sorted[-1] - ranks_sorted[0] == len(ranks_sorted) - 1):
             return Combo(ComboType.PLATE, t_cards, ranks_sorted[-1])
 
     return None  # Invalid combination
